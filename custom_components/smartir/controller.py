@@ -4,6 +4,7 @@ import binascii
 import requests
 import logging
 import json
+import socket
 
 from homeassistant.const import ATTR_ENTITY_ID
 from . import Helper
@@ -14,6 +15,7 @@ BROADLINK_CONTROLLER = 'Broadlink'
 XIAOMI_CONTROLLER = 'Xiaomi'
 MQTT_CONTROLLER = 'MQTT'
 LOOKIN_CONTROLLER = 'LOOKin'
+GC_CONTROLLER = 'Globalcache'
 ESPHOME_CONTROLLER = 'ESPHome'
 
 ENC_BASE64 = 'Base64'
@@ -25,6 +27,7 @@ BROADLINK_COMMANDS_ENCODING = [ENC_BASE64, ENC_HEX, ENC_PRONTO]
 XIAOMI_COMMANDS_ENCODING = [ENC_PRONTO, ENC_RAW]
 MQTT_COMMANDS_ENCODING = [ENC_RAW]
 LOOKIN_COMMANDS_ENCODING = [ENC_PRONTO, ENC_RAW]
+GC_COMMANDS_ENCODING = [ENC_RAW]
 ESPHOME_COMMANDS_ENCODING = [ENC_RAW]
 
 
@@ -35,6 +38,7 @@ def get_controller(hass, controller, encoding, controller_data, delay):
         XIAOMI_CONTROLLER: XiaomiController,
         MQTT_CONTROLLER: MQTTController,
         LOOKIN_CONTROLLER: LookinController,
+        GC_CONTROLLER: GlobalcacheController,
         ESPHOME_CONTROLLER: ESPHomeController
     }
     try:
@@ -151,7 +155,6 @@ class MQTTController(AbstractController):
         await self.hass.services.async_call(
             'mqtt', 'publish', service_data)
 
-
 class LookinController(AbstractController):
     """Controls a Lookin device."""
 
@@ -168,6 +171,36 @@ class LookinController(AbstractController):
                 f"{encoding}/{command}"
         await self.hass.async_add_executor_job(requests.get, url)
 
+class GlobalcacheController(AbstractController):
+    """Controls a Global Cachè device (RAW via TCP)."""
+
+    def check_encoding(self, encoding):
+        """Check if the encoding is supported by the controller."""
+        if encoding not in GC_COMMANDS_ENCODING:
+            raise Exception("The encoding is not supported by the Global Cachè controller.")
+
+    async def send(self, command):
+        """Send a RAW command via TCP."""
+        # separa host e porta do controller_data
+        host, port = self._controller_data.split(":")
+        port = int(port)
+
+        # converte comando para bytes se necessário
+        if isinstance(command, str):
+            command_bytes = command.encode('utf-8')
+        else:
+            command_bytes = command
+
+        def do_send():
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((host, port))
+                    s.sendall(command_bytes)
+            except Exception as e:
+                _LOGGER.error(f"Error sending RAW command via TCP: {e}")
+
+        # executa em thread separada para não travar o loop async
+        await self.hass.async_add_executor_job(do_send)
 
 class ESPHomeController(AbstractController):
     """Controls a ESPHome device."""
